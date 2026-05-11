@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./.github/social-preview.png" alt="Sift — knowledge vaults that think before they store" width="100%" />
+</p>
+
 # Sift
 
 A spec for AI-assisted knowledge vaults that **think before they store**.
@@ -96,9 +100,21 @@ See [SPEC.md](./SPEC.md) for the full frontmatter schema, sink trigger details, 
 
 ---
 
+## Examples
+
+Three real cards extracted from a vault running these principles in production (private project names, paths, and API references redacted). They show what each card type looks like under real load, not as theoretical templates:
+
+- [examples/research-example.md](./examples/research-example.md) — investigation into the Obsidian + Claude Code ecosystem (with `expires` + `recheck-trigger` in action)
+- [examples/debug-example.md](./examples/debug-example.md) — Obsidian EISDIR crash on WSL `\\wsl.localhost\` paths, root-caused to 9P protocol
+- [examples/decision-example.md](./examples/decision-example.md) — repositioning a personal vault as a Claude-facing SKILL library, with steelmanned rejected options
+
+Every example links to the other two — that's how the four-folder layout produces a graph rather than isolated documents.
+
 ## Status
 
 This is a working draft. The spec was extracted from a real personal vault running these principles in production. It is being made public to invite review, criticism, and adoption.
+
+> **项目不在于成熟,而在于出现** — putting it out is more important than making it perfect.
 
 Contributions welcome via pull request.
 
