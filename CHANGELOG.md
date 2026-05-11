@@ -6,20 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Sift u
 
 ## [Unreleased]
 
-### Added — Phase B · AI-autonomous sink + recheck (2026-05-11)
+### Added
 
-- `tools/recheck-agent.py` — LLM-driven recheck agent. Batch-scans vault cards (BATCH_SIZE=8), asks SiliconFlow DeepSeek-V3 to verdict each as `keep` / `kill` / `merge` / `rewrite`. `kill` performs soft-delete to `_trash/YYYY-WW/`; weekly report written to `<vault>/sift/_reports/YYYY-WW.md`; Telegram summary on completion.
+- `tools/recheck-agent.py` — LLM-driven complement to `recheck.sh`. Batch-scans vault cards, asks an LLM to verdict each as `keep` / `kill` / `merge` / `rewrite`, soft-deletes kills to `_trash/YYYY-WW/`, writes a markdown week report to `<vault>/sift/_reports/`. Defaults to `--dry-run`; `--execute` required to actually move files.
 - `tools/recheck-agent.sh` — bash wrapper matching `lint.sh` / `recheck.sh` style.
-- Default is `--dry-run` (writes `.dry-run.md` report only, touches no files). Explicit `--execute` required to actually soft-delete — reflects LLM single-pass verdict stochasticity (observed 50% misjudgment rate in P5 testing; one user-important `decisions/` card was mislabeled `kill` and required rollback).
-
-### Notes — Phase B
-
-- A companion `~/.claude/hooks/sift-sink-agent.py` (per-machine Stop hook, **not in repo**) decides whether each Claude Code session deserves a new card and writes it automatically. Failures route to `_quarantine/` via `lint.sh` validation; successes notify Telegram.
-- Phase B closes the spec→runtime loop: v0.1.0 gave humans a format; Phase B makes the format AI-maintained.
-- See [issue #2](https://github.com/HuanNan520/sift/issues/2) for the full P0–P5 build log and lessons learned.
-
-### Added — Documentation, spec tooling (earlier 2026-05-11)
-
 - `QUICKSTART.md` — 10-minute setup guide for fresh Obsidian vaults
 - `llms.txt` at repo root for AI crawlers (ChatGPT, Claude, Perplexity, AI Overviews)
 - `CHANGELOG.md` (this file)
