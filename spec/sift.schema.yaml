@@ -1,0 +1,116 @@
+# Sift v0.1 frontmatter schema (YAML / JSON Schema draft-2020-12)
+#
+# Use with: yamllint, ajv, or any JSON Schema validator.
+# Each Sift card has YAML frontmatter at the top. This schema validates
+# the shape of that frontmatter — the markdown body is not validated here.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://github.com/HuanNan520/sift/spec/sift.schema.yaml"
+title: "Sift card frontmatter"
+description: "Frontmatter contract for cards in a Sift-compliant vault"
+
+# Top-level: discriminator on `type`, then per-type required fields
+type: object
+required: [type, date, tags, ai-first]
+properties:
+  type:
+    type: string
+    enum: [research, debug, solution, scripts, script, decisions, decision]
+    description: |
+      Card type. Note: `debug`/`solution`, `scripts`/`script`, `decisions`/`decision`
+      are accepted variants for historical compatibility; new cards SHOULD use the
+      folder name (research, debug, scripts, decisions).
+  date:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    description: "ISO date the card was first written. YYYY-MM-DD."
+  tags:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      pattern: "^[a-z0-9][a-z0-9-]*$"
+    description: "Lowercase, hyphen-separated tags. No spaces, no caps."
+  ai-first:
+    const: true
+    description: "Marker that this card follows the Sift writing rules. Must be literally `true`."
+  audience:
+    type: string
+    description: |
+      Optional. Defaults to `claude` (AI-only retrieval). Use `claude+user`
+      for cards that humans also need to read directly (product plans,
+      onboarding docs, etc.).
+
+# Type-specific requirements
+allOf:
+
+  # research: must have expires + recheck-trigger + problem + solution-summary
+  - if:
+      properties: { type: { const: research } }
+    then:
+      required: [problem, solution-summary, expires, recheck-trigger]
+      properties:
+        problem:
+          type: string
+          maxLength: 200
+          description: "One-line statement of the question."
+        solution-summary:
+          type: string
+          maxLength: 300
+          description: "One-line statement of the conclusion."
+        expires:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          description: |
+            Date past which this card's conclusion must be re-verified.
+            Default convention: date + 3 months.
+        recheck-trigger:
+          type: array
+          minItems: 1
+          items: { type: string }
+          description: |
+            Specific external conditions that, if any triggers, mean this card
+            must be re-investigated regardless of `expires`.
+
+  # debug: must have problem + solution-summary (root-cause comes in body)
+  - if:
+      properties: { type: { enum: [debug, solution] } }
+    then:
+      required: [problem, solution-summary]
+      properties:
+        problem:
+          type: string
+          maxLength: 200
+        solution-summary:
+          type: string
+          maxLength: 300
+
+  # scripts: must have purpose
+  - if:
+      properties: { type: { enum: [scripts, script] } }
+    then:
+      required: [purpose]
+      properties:
+        purpose:
+          type: string
+          maxLength: 200
+          description: "One-line statement of what the script does."
+
+  # decisions: must have context + choice
+  - if:
+      properties: { type: { enum: [decisions, decision] } }
+    then:
+      required: [context, choice]
+      properties:
+        context:
+          type: string
+          maxLength: 300
+          description: "One-line statement of the situation that forced the decision."
+        choice:
+          type: string
+          maxLength: 300
+          description: "One-line statement of the option that was picked."
+
+# Allow additional properties (Sift doesn't lock down the frontmatter — future
+# card types or per-vault extensions are welcome)
+additionalProperties: true

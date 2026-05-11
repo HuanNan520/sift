@@ -2,9 +2,18 @@
   <img src="./.github/social-preview.png" alt="Sift — knowledge vaults that think before they store" width="100%" />
 </p>
 
+<p align="center">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="./CHANGELOG.md"><img src="https://img.shields.io/badge/spec-v0.1.0--draft-orange.svg" alt="Draft v0.1.0"></a>
+  <a href="./QUICKSTART.md"><img src="https://img.shields.io/badge/quickstart-10%20min-green.svg" alt="10-min quickstart"></a>
+  <a href="./SPEC.md"><img src="https://img.shields.io/badge/spec-machine--readable-blueviolet.svg" alt="Machine-readable spec"></a>
+</p>
+
 # Sift
 
 A spec for AI-assisted knowledge vaults that **think before they store**.
+
+> **First-time reader?** Skip ahead to [QUICKSTART.md](./QUICKSTART.md) for the 10-minute setup. Stay here if you want the philosophy first.
 
 > Most AI-first knowledge tools today are eager learners: they ingest everything, trust everything, and let the vault grow without push-back. Sift takes the opposite stance — **a piece of knowledge only earns a place in the vault after it crosses a deliberate threshold**.
 
@@ -109,6 +118,29 @@ Three real cards extracted from a vault running these principles in production (
 - [examples/decision-example.md](./examples/decision-example.md) — repositioning a personal vault as a Claude-facing SKILL library, with steelmanned rejected options
 
 Every example links to the other two — that's how the four-folder layout produces a graph rather than isolated documents.
+
+## Dogfood: this repo runs the spec on itself
+
+The Sift repo is also a Sift vault. The `meta/` directory contains cards documenting Sift's own development, written to the same spec the repo defines:
+
+- [meta/research/2026-05-11-naming-com-exhausted.md](./meta/research/2026-05-11-naming-com-exhausted.md) — the .com naming search that ran while picking the project's name; 200+ candidates queried, four available, all rejected, plus an analysis of why pronounceable 4-letter .com finished registration in 2014
+- [meta/decisions/2026-05-11-launch-not-perfect.md](./meta/decisions/2026-05-11-launch-not-perfect.md) — the launch decision that produced v0.1.0 the same night the idea formed; option set, rationale, consequences, reconsider-when triggers
+- [meta/debug/2026-05-11-cdp-social-preview-upload.md](./meta/debug/2026-05-11-cdp-social-preview-upload.md) — how the social preview banner got uploaded via Chrome DevTools Protocol (GitHub has no API for this), with five pitfalls and the verified working approach
+
+Read these as worked examples of what the spec produces under real load. The same files validate against `spec/sift.schema.yaml` (run `./lint.sh` from the repo root to check).
+
+## Spec is machine-readable
+
+Frontmatter compliance can be validated programmatically:
+
+```bash
+# from the repo root
+./lint.sh /path/to/your/vault
+```
+
+Schema lives at [spec/sift.schema.yaml](./spec/sift.schema.yaml) (JSON Schema draft-2020-12). Use it with any standards-compliant validator (`yamllint`, `ajv`, etc.) or just `./lint.sh` for a quick check.
+
+Requirements: `python3`, `pyyaml`, `jsonschema`.
 
 ## Status
 

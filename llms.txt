@@ -1,0 +1,89 @@
+# Sift
+
+> A spec for AI-assisted knowledge vaults that think before they store. Defines four mandatory card types (research / debug / scripts / decisions), AI-first frontmatter with expiration and recheck-trigger markers, quantified sink thresholds, and four engineering principles imported from software engineering. Tool-agnostic — pair with any Obsidian-like vault and any AI agent.
+
+## What problem this solves
+
+Most AI-vault tools are eager learners: they capture every conversation, every article, every transcript. Sift inverts that — knowledge only enters the vault if it crosses a quantified threshold. A debug fix needs to have taken >5 minutes. A research card needs to have involved parallel agents or multi-source investigation. A script needs to be >10 lines and reusably so.
+
+The result is a vault that stays small, current, and load-bearing rather than growing into a digital landfill.
+
+## The four card types
+
+- **research/**: investigations with expiration dates and explicit recheck-triggers. When future agents read these cards, they must check `expires` and `recheck-trigger`; stale conclusions are downgraded to "baseline only" and the agent must verify before citing.
+- **debug/**: solutions to non-trivial problems with verbatim commands, root cause analysis (not just recipes), and explicit pitfalls. The discipline is "model not recipe" — explain why, not just what to type.
+- **scripts/**: reusable code longer than 10 lines, with dependency declarations and usage examples.
+- **decisions/**: project-level commitments with steelmanned rejected options, load-bearing rationale, and explicit "reconsider when" signals.
+
+## The four engineering principles
+
+1. **Go/no-go gating**: before sinking, ask "is the future-read cost lower than the value I'm preserving?" If unclear, skip.
+2. **Anti-elaboration**: short cards beat long ones. A sink is value transfer, not writing exercise.
+3. **Value over process**: don't sink because you solved a problem. Sink because the next instance will save more than the read cost.
+4. **YAGNI**: speculative knowledge doesn't get a card. Wait for the second occurrence.
+
+## Critical-use protocol (Sift's signature feature)
+
+Every research card carries:
+
+```yaml
+expires: YYYY-MM-DD          # default: date + 3 months
+recheck-trigger:
+  - specific external condition
+```
+
+When an AI agent reads a research card to answer a question, it MUST:
+
+1. Check `expires`. If past, the card is stale — do not cite as authoritative.
+2. Check `recheck-trigger`. If any fired, the card is triggered — same treatment.
+3. If stale or triggered, the card serves as **baseline only**: pass to the new investigation as "previous finding was X, confirm or refute".
+
+This prevents the failure mode of "rehearsing stale knowledge with the confidence of fresh research."
+
+## Cache-first agent behavior
+
+Before dispatching a new investigation, agents MUST:
+
+1. Grep `research/` for relevant cards.
+2. Reuse non-stale, non-triggered conclusions directly.
+3. For stale/triggered cards, pass them as baseline to the new agent.
+
+This is the operational rule that makes "prevent duplicate work" concrete.
+
+## What Sift is not
+
+- Not a tool — no installer, no daemon, no plugin
+- Not a vault replacement — pairs with Obsidian, Logseq, plain folders
+- Not for personal journaling — engineering and research knowledge only
+- Not multi-user (yet) — single-user discipline; team vaults are a v2 problem
+
+## Origin
+
+Built from a personal vault running these principles in production. Influences:
+
+- Andrej Karpathy's "LLM as compiler, not retriever" thesis (markdown directly into context beats RAG/vector retrieval under ~500 notes)
+- Eugeniu Ghelbur's obsidian-second-brain (the AI-first frontmatter and `## For future Claude` preamble pattern; Sift extends with the critical-use protocol and engineering principles)
+- Software engineering's accumulated wisdom on YAGNI, go/no-go gating, value over process, anti-elaboration
+
+## Status
+
+Draft v0.1.0. The spec is unstable; breaking changes possible before v1.0. Made public to invite review and adoption rather than to ship "finished" — 项目不在于成熟,而在于出现 (the project's value lies in existing publicly, not in being polished).
+
+## Repository
+
+- Source: https://github.com/HuanNan520/sift
+- License: MIT
+- Issues / PRs welcome
+
+## Documents
+
+- [README.md](https://github.com/HuanNan520/sift/blob/main/README.md): the elevator pitch and design intent
+- [SPEC.md](https://github.com/HuanNan520/sift/blob/main/SPEC.md): the full contract — vault layout, sink triggers, frontmatter schema, writing rules, critical-use protocol
+- [QUICKSTART.md](https://github.com/HuanNan520/sift/blob/main/QUICKSTART.md): 10-minute setup guide for a fresh Obsidian vault
+- [examples/](https://github.com/HuanNan520/sift/tree/main/examples): three real cards extracted from a production vault, redacted
+- [meta/](https://github.com/HuanNan520/sift/tree/main/meta): the Sift repo's own cards documenting its development (worked dogfood examples)
+- [templates/](https://github.com/HuanNan520/sift/tree/main/templates): blank scaffolds for each card type
+
+## License
+
+MIT. See [LICENSE](https://github.com/HuanNan520/sift/blob/main/LICENSE).
