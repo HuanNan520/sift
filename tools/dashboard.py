@@ -363,6 +363,24 @@ def render_html(stats, vault, title):
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     color: var(--cyan);
   }}
+  .intro {{
+    background: var(--card); border-radius: 12px;
+    padding: 20px 24px; margin-bottom: 24px;
+    border-left: 3px solid var(--blue);
+  }}
+  .intro h3 {{
+    margin: 0 0 10px; color: #fff; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+  }}
+  .intro p {{ margin: 6px 0; color: var(--fg); font-size: 13px; }}
+  .intro .legend-inline {{
+    display: flex; flex-wrap: wrap; gap: 18px; margin-top: 10px;
+    color: var(--muted); font-size: 12px;
+  }}
+  .intro .legend-inline span {{ display: inline-flex; align-items: center; gap: 6px; }}
+  .intro .legend-inline .dot {{
+    width: 10px; height: 10px; border-radius: 50%;
+  }}
   .kpi-row {{
     display: grid; grid-template-columns: repeat(4, 1fr);
     gap: 16px; margin-bottom: 32px;
@@ -380,6 +398,11 @@ def render_html(stats, vault, title):
   .kpi-sub code {{
     font-family: 'JetBrains Mono', monospace; color: var(--cyan);
   }}
+  .kpi-hint {{
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    color: var(--muted); font-size: 11px; line-height: 1.5;
+  }}
   .kpi.good .kpi-value {{ color: var(--green); }}
   .kpi.warn .kpi-value {{ color: var(--yellow); }}
   .kpi.bad .kpi-value {{ color: var(--red); }}
@@ -388,8 +411,29 @@ def render_html(stats, vault, title):
     padding: 24px; margin-bottom: 20px;
   }}
   .panel h2 {{
-    margin: 0 0 18px; color: #fff; font-size: 15px; font-weight: 600;
+    margin: 0 0 6px; color: #fff; font-size: 15px; font-weight: 600;
     letter-spacing: 0.2px;
+  }}
+  .panel .hint {{
+    margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6;
+  }}
+  .panel .hint code {{
+    font-family: 'JetBrains Mono', monospace; color: var(--cyan); font-size: 11px;
+  }}
+  .action-row {{
+    margin-top: 28px; padding: 20px 24px; background: var(--card);
+    border-radius: 12px; border-left: 3px solid var(--green);
+  }}
+  .action-row h3 {{
+    margin: 0 0 12px; color: #fff; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+  }}
+  .action-row ul {{ margin: 0; padding-left: 22px; color: var(--fg); }}
+  .action-row li {{ margin: 4px 0; font-size: 13px; line-height: 1.7; }}
+  .action-row code {{
+    background: var(--bg); padding: 2px 6px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--cyan); font-size: 12px;
   }}
   .panel-row {{
     display: grid; grid-template-columns: 240px 1fr;
@@ -465,31 +509,47 @@ def render_html(stats, vault, title):
     </div>
   </div>
 
+  <div class="intro">
+    <h3>这份报告告诉你什么 · What this report says</h3>
+    <p>sift 把 AI 帮你解过的有用的事沉淀成「会过期、能复核」的卡片。这份报告扫了你 vault 里所有卡片,告诉你三件事:</p>
+    <p>① 这堆卡是不是<b>合规的</b>(能被 sift 工具消费) · ② 哪些卡<b>快到期 / 已过期</b>(需要复核是否仍成立) · ③ 沉淀<b>种类分布</b>(你最近在解什么类型的问题)。</p>
+    <div class="legend-inline">
+      <span><span class="dot" style="background:var(--green)"></span>绿 = 健康</span>
+      <span><span class="dot" style="background:var(--yellow)"></span>黄 = 快到期 / 接近阈值</span>
+      <span><span class="dot" style="background:var(--red)"></span>红 = 要立即处理</span>
+    </div>
+  </div>
+
   <div class="kpi-row">
     <div class="kpi">
-      <div class="kpi-label">total cards</div>
+      <div class="kpi-label">total cards · 卡片总数</div>
       <div class="kpi-value">{stats['total']}</div>
       <div class="kpi-sub">across 4 type folders</div>
+      <div class="kpi-hint">vault 的体量。应稳定增长;长期不涨说明 AI 协作没在沉淀。</div>
     </div>
     <div class="kpi {compliance_kpi_cls}">
-      <div class="kpi-label">schema compliance</div>
+      <div class="kpi-label">schema compliance · 规范合规率</div>
       <div class="kpi-value">{stats['compliance_pct']}%</div>
       <div class="kpi-sub">{stats['lint_pass']}/{stats['lint_total']} pass <code>lint.sh</code></div>
+      <div class="kpi-hint">通过 sift 校验的占比。≥95% 健康 · &lt;95% 跑 <code>tools/lint.sh</code> 查具体哪张卡。</div>
     </div>
     <div class="kpi {health_kpi_cls}">
-      <div class="kpi-label">healthy cards</div>
+      <div class="kpi-label">healthy cards · 健康卡数</div>
       <div class="kpi-value">{stats['healthy']}</div>
       <div class="kpi-sub">{stats['expired']} expired · {stats['nearing']} expiring &lt;30d</div>
+      <div class="kpi-hint">30 天内不会到期的卡。已过期 / 近过期数字越大 = 越快需要复核。</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">avg remaining life</div>
+      <div class="kpi-label">avg remaining life · 平均剩余寿命</div>
       <div class="kpi-value">{stats['avg_remaining_days']}<span style="font-size:18px;color:var(--muted);margin-left:4px;">d</span></div>
       <div class="kpi-sub">across cards with <code>expires</code></div>
+      <div class="kpi-hint">距离 expires 的天数均值。&gt;180 天健康 · &lt;60 天 = 该批量重核了。</div>
     </div>
   </div>
 
   <div class="panel">
-    <h2>Card type distribution</h2>
+    <h2>Card type distribution · 卡片类型分布</h2>
+    <p class="hint">看你最近沉淀的<b>方向</b>。<code>debug</code> 多 = 在修 bug · <code>research</code> 多 = 在调研 · <code>decisions</code> 多 = 在做架构决策 · <code>scripts</code> 多 = 在攒可复用片段。比例严重失衡说明协作模式可能跑偏。</p>
     <div class="panel-row">
       <div>{donut_svg(stats['type_counts'])}</div>
       <div class="legend">
@@ -499,23 +559,37 @@ def render_html(stats, vault, title):
   </div>
 
   <div class="panel">
-    <h2>Expiration timeline by month</h2>
+    <h2>Expiration timeline · 未来过期分布(按月)</h2>
+    <p class="hint">每个色块 = 该月有多少张卡到期。色越红越深 = 集中度越高 = 那个月要提前安排复核时间。空 = 那个月没东西需要重核。</p>
     {heatmap_svg(stats['month_buckets'])}
   </div>
 
   <div class="panel">
-    <h2>Frontmatter field coverage</h2>
+    <h2>Frontmatter field coverage · 关键字段覆盖率</h2>
+    <p class="hint">sift 要求 research / debug / decisions 三类卡必须有 <code>expires</code> 和 <code>recheck-trigger</code> 字段(否则没法过期复核)。绿条(&gt;90%) = 合规 · 黄条(&lt;50%) = 大量卡缺关键字段需补。</p>
     {bar_svg(stats['field_coverage'], stats['total'])}
   </div>
 
   <div class="panel">
-    <h2>Next 10 expiring</h2>
+    <h2>Next 10 expiring · 最近 10 张到期</h2>
+    <p class="hint">按距离过期的天数升序。红字 = <b>已过期</b>(立即重核) · 黄字 = <b>30 天内到期</b> · 白字 = 较远。直接照着列表跑 <code>tools/recheck.sh</code> 或人工挨张过。</p>
     <table>
       <thead><tr>
         <th>path</th><th>type</th><th>expires</th><th>in</th><th>about</th>
       </tr></thead>
       <tbody>{''.join(top10_rows) if top10_rows else '<tr><td colspan="5" style="color:#787c99;text-align:center;padding:24px;">no cards with expires</td></tr>'}</tbody>
     </table>
+  </div>
+
+  <div class="action-row">
+    <h3>看到这些数字应该做什么 · What to do</h3>
+    <ul>
+      <li>看到 <b>schema compliance &lt; 100%</b> → 跑 <code>./tools/lint.sh ~/your-vault/</code> 看是哪张卡的字段不对,改完再扫</li>
+      <li>看到 <b>有红/黄数字</b>(已过期 / 近过期) → 跑 <code>./tools/recheck.sh --within-days 30 ~/your-vault/</code> 出待办列表挨张过</li>
+      <li>看到 <b>某月色块异常深</b> → 提前把那个月的复核排进 calendar,别等真到期才一次性爆掉</li>
+      <li>看到 <b>字段覆盖率黄/红条</b> → 大量旧卡缺 expires / recheck-trigger,挨张补字段并设触发条件</li>
+      <li>不了解卡片格式 → 看 <a href="https://github.com/HuanNan520/sift/blob/main/SPEC_zh.md" style="color:var(--blue);">SPEC_zh.md 中文规范</a> 或 <a href="https://github.com/HuanNan520/sift/blob/main/QUICKSTART_zh.md" style="color:var(--blue);">5 分钟快速开始</a></li>
+    </ul>
   </div>
 
   <div class="footer">
