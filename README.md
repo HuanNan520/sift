@@ -3,6 +3,11 @@
 </p>
 
 <p align="center">
+  <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue" alt="English"></a>
+  <a href="./README_zh.md"><img src="https://img.shields.io/badge/lang-简体中文-red" alt="简体中文"></a>
+</p>
+
+<p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="./CHANGELOG.md"><img src="https://img.shields.io/badge/spec-v0.1.0--draft-orange.svg" alt="Draft v0.1.0"></a>
   <a href="./QUICKSTART.md"><img src="https://img.shields.io/badge/quickstart-10%20min-green.svg" alt="10-min quickstart"></a>

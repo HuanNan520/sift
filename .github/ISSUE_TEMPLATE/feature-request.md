@@ -35,7 +35,7 @@ If three out of four point toward "no", the proposal is unlikely to land.
 
 - Are there existing card types or rules that cover this case partially?
 - What's the workaround today, and why is it inadequate?
-- Have you seen another spec (Karpathy's LLM wiki, obsidian-second-brain, etc.) handle this differently?
+- Have you seen prior art (e.g. Karpathy's LLM wiki gist, or other AI-vault writeups) handle this differently?
 
 ## Additional context
 

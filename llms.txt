@@ -59,11 +59,10 @@ This is the operational rule that makes "prevent duplicate work" concrete.
 
 ## Origin
 
-Built from a personal vault running these principles in production. Influences:
+Sift was designed from scratch by its author, distilled from several months of running a personal Claude Code + markdown vault in production. Influences:
 
 - Andrej Karpathy's "LLM as compiler, not retriever" thesis (markdown directly into context beats RAG/vector retrieval under ~500 notes)
-- Eugeniu Ghelbur's obsidian-second-brain (the AI-first frontmatter and `## For future Claude` preamble pattern; Sift extends with the critical-use protocol and engineering principles)
-- Software engineering's accumulated wisdom on YAGNI, go/no-go gating, value over process, anti-elaboration
+- Software engineering's accumulated discipline: YAGNI, go/no-go gating, value over process, anti-elaboration — the core thesis is that knowledge management deserves the same engineering discipline as code
 
 ## Status
 

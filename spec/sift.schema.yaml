@@ -29,8 +29,13 @@ properties:
     minItems: 1
     items:
       type: string
-      pattern: "^[a-z0-9][a-z0-9-]*$"
-    description: "Lowercase, hyphen-separated tags. No spaces, no caps."
+      pattern: "^[a-zA-Z0-9一-鿿぀-ゟ゠-ヿ가-힯][a-zA-Z0-9一-鿿぀-ゟ゠-ヿ가-힯._-]*$"
+    description: |
+      Hyphen-separated tags. Supports ASCII letters + digits + CJK characters
+      (汉字 / 平假名 / 片假名 / 한글) + `_` + `.` (for version-like tokens such
+      as `198.18` or `re.sub`). No spaces, no special punctuation otherwise.
+      Multilingual users should write tags in their native language directly;
+      no romanization required.
   ai-first:
     const: true
     description: "Marker that this card follows the Sift writing rules. Must be literally `true`."
@@ -52,11 +57,11 @@ allOf:
       properties:
         problem:
           type: string
-          maxLength: 200
+          maxLength: 400
           description: "One-line statement of the question."
         solution-summary:
           type: string
-          maxLength: 300
+          maxLength: 600
           description: "One-line statement of the conclusion."
         expires:
           type: string
@@ -80,10 +85,10 @@ allOf:
       properties:
         problem:
           type: string
-          maxLength: 200
+          maxLength: 400
         solution-summary:
           type: string
-          maxLength: 300
+          maxLength: 600
 
   # scripts: must have purpose
   - if:
@@ -93,7 +98,7 @@ allOf:
       properties:
         purpose:
           type: string
-          maxLength: 200
+          maxLength: 400
           description: "One-line statement of what the script does."
 
   # decisions: must have context + choice
@@ -104,11 +109,11 @@ allOf:
       properties:
         context:
           type: string
-          maxLength: 300
+          maxLength: 600
           description: "One-line statement of the situation that forced the decision."
         choice:
           type: string
-          maxLength: 300
+          maxLength: 600
           description: "One-line statement of the option that was picked."
 
 # Allow additional properties (Sift doesn't lock down the frontmatter — future

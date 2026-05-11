@@ -57,10 +57,17 @@ Every card MUST have YAML frontmatter at the top.
 ---
 type: research | debug | scripts | decisions
 date: YYYY-MM-DD
-tags: [lowercase, array, hyphenated]
+tags: [hyphenated-english, 中文也可以, 日本語もok]
 ai-first: true
 ---
 ```
+
+**Tags rules**:
+
+- Hyphen-separated, no spaces, no special punctuation
+- Lowercase ASCII recommended for cross-vault portability
+- **CJK characters (汉字 / 平假名 / 片假名 / 한글) are accepted** — multilingual users should write tags in their native language directly
+- Pattern: `^[a-zA-Z0-9一-鿿぀-ゟ゠-ヿ가-힯][a-zA-Z0-9一-鿿぀-ゟ゠-ヿ가-힯-]*$`
 
 ### 3.2 Type-specific fields
 
@@ -243,10 +250,9 @@ v0.x means the spec is unstable and may change before v1.0.
 
 ## 10. Acknowledgements
 
-The spec is built on top of:
+Sift was designed from scratch by its author, distilled from several months of running a personal Claude Code + markdown vault in production. The spec is informed by:
 
 - **Andrej Karpathy's "LLM as compiler" thesis** ([gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)) — markdown text directly into an LLM context beats RAG / vector retrieval for vaults under ~500 notes
-- **Eugeniu Ghelbur's [obsidian-second-brain](https://github.com/eugeniughelbur/obsidian-second-brain)** — the AI-first frontmatter and `## For future Claude` preamble pattern. Sift extends his approach with the critical-use protocol and engineering principles
-- Software engineering's accumulated wisdom on `YAGNI`, `go/no-go gating`, `value over process`, and `anti-elaboration`
+- **Software engineering's accumulated discipline** — `YAGNI`, `go/no-go gating`, `value over process`, `anti-elaboration`. The core thesis of Sift is that knowledge management deserves the same engineering discipline as code, because both compound, both decay, and both punish the careless.
 
-If you're new to the AI-vault space, read Karpathy's gist first. If you want a vault-first reference tool, look at obsidian-second-brain. Sift is the spec these tools could implement.
+If you're new to the AI-vault space, read Karpathy's gist first — it explains why this whole category is worth thinking about.
