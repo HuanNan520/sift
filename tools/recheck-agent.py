@@ -22,12 +22,20 @@ from datetime import date, datetime
 from pathlib import Path
 
 
-VAULT = Path.home() / "claude-journal"
+def _envpath(name: str, default: Path) -> Path:
+    v = os.environ.get(name, "")
+    return Path(v) if v else default
+
+
+VAULT = _envpath("SIFT_ROOT", Path.home() / "claude-journal")
 VAULT_SKILLS = VAULT / "skills"
-TRASH = VAULT_SKILLS / "_trash"
-REPORTS = VAULT / "sift" / "_reports"
-LOG_PATH = Path.home() / ".claude" / "hooks" / "recheck-agent.log"
-SF_KEY_PATH = Path.home() / ".claude/projects/-home-huannan/memory/reference_siliconflow_api.md"
+TRASH = _envpath("SIFT_TRASH", VAULT_SKILLS / "_trash")
+REPORTS = _envpath("SIFT_REPORTS", VAULT / "sift" / "_reports")
+LOG_PATH = _envpath("SIFT_LOG_DIR", Path.home() / ".claude" / "hooks") / "recheck-agent.log"
+SF_KEY_PATH = _envpath(
+    "SIFT_SF_KEY_MEMORY",
+    Path.home() / ".claude/projects/-home-huannan/memory/reference_siliconflow_api.md",
+)
 
 SF_URL = "https://api.siliconflow.cn/v1/chat/completions"
 SF_MODEL = "deepseek-ai/DeepSeek-V3"
@@ -50,6 +58,9 @@ def log(msg: str):
 
 
 def load_sf_key() -> str:
+    env_key = os.environ.get("SILICONFLOW_API_KEY", "")
+    if env_key.startswith("sk-"):
+        return env_key
     if not SF_KEY_PATH.exists():
         return ""
     try:
