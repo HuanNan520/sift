@@ -37,8 +37,9 @@ SF_KEY_PATH = _envpath(
     Path.home() / ".claude/projects/-home-huannan/memory/reference_siliconflow_api.md",
 )
 
-SF_URL = "https://api.siliconflow.cn/v1/chat/completions"
-SF_MODEL = "deepseek-ai/DeepSeek-V3"
+SF_URL = os.environ.get("LLM_API_URL", "https://api.siliconflow.cn/v1/chat/completions")
+SF_MODEL = os.environ.get("LLM_MODEL", "deepseek-ai/DeepSeek-V3")
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))
 
 CATEGORIES = ["research", "debug", "decisions", "scripts"]
 BATCH_SIZE = 8
@@ -58,9 +59,10 @@ def log(msg: str):
 
 
 def load_sf_key() -> str:
-    env_key = os.environ.get("SILICONFLOW_API_KEY", "")
-    if env_key.startswith("sk-"):
-        return env_key
+    for var in ("LLM_API_KEY", "DEEPSEEK_API_KEY", "SILICONFLOW_API_KEY"):
+        v = os.environ.get(var, "")
+        if v.startswith("sk-"):
+            return v
     if not SF_KEY_PATH.exists():
         return ""
     try:
@@ -173,7 +175,7 @@ def call_llm(messages: list, timeout: int = 120):
     body = json.dumps({
         "model": SF_MODEL,
         "messages": messages,
-        "max_tokens": 2000,
+        "max_tokens": LLM_MAX_TOKENS,
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
     }).encode("utf-8")

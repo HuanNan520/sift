@@ -42,8 +42,9 @@ SF_KEY_PATH = _envpath(
 )
 LINT_SH = _envpath("SIFT_LINT_BIN", Path("/mnt/e/带走/sift/lint.sh"))
 
-SF_URL = "https://api.siliconflow.cn/v1/chat/completions"
-SF_MODEL = "deepseek-ai/DeepSeek-V3"
+SF_URL = os.environ.get("LLM_API_URL", "https://api.siliconflow.cn/v1/chat/completions")
+SF_MODEL = os.environ.get("LLM_MODEL", "deepseek-ai/DeepSeek-V3")
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))
 
 VALID_TYPES = {"debug", "scripts", "decisions", "research"}
 
@@ -59,9 +60,12 @@ def log(msg: str):
 
 
 def load_sf_key() -> str:
-    env_key = os.environ.get("SILICONFLOW_API_KEY", "")
-    if env_key.startswith("sk-"):
-        return env_key
+    # env priority: LLM_API_KEY (generic, current provider) > DEEPSEEK_API_KEY > SILICONFLOW_API_KEY
+    for var in ("LLM_API_KEY", "DEEPSEEK_API_KEY", "SILICONFLOW_API_KEY"):
+        v = os.environ.get(var, "")
+        if v.startswith("sk-"):
+            return v
+    # fallback: memory .md file regex (WSL legacy)
     if not SF_KEY_PATH.exists():
         return ""
     try:
@@ -187,7 +191,7 @@ def call_llm(transcript_text: str, today_str: str, timeout: int = 120) -> dict |
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_msg},
         ],
-        "max_tokens": 3000,
+        "max_tokens": LLM_MAX_TOKENS,
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
     }).encode("utf-8")
