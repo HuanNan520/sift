@@ -81,10 +81,21 @@ def watch_loop():
     Subsequent mtime changes re-arm the file for another dispatch.
     """
     JSONL_ROOT.mkdir(parents=True, exist_ok=True)
-    log(f"start polling {JSONL_ROOT} (poll={POLL_SECONDS}s, settle={SETTLE_SECONDS}s, agent={SINK_AGENT})")
-    # state: path -> (last_seen_mtime, last_dispatched_mtime)
-    # dispatch when last_seen_mtime stable for SETTLE_SECONDS AND != last_dispatched
     seen: dict[str, tuple[float, float, float]] = {}  # path -> (mtime, first_seen_at, last_dispatched_mtime)
+
+    # Init scan: mark every existing *.jsonl as "already dispatched at current
+    # mtime". Restart safety — without this, every existing file would re-dispatch.
+    # Only mtime changes after init will trigger dispatch.
+    now0 = time.time()
+    init_count = 0
+    for p in JSONL_ROOT.rglob("*.jsonl"):
+        try:
+            st = p.stat()
+            seen[str(p)] = (st.st_mtime, now0, st.st_mtime)
+            init_count += 1
+        except FileNotFoundError:
+            continue
+    log(f"start polling {JSONL_ROOT} (poll={POLL_SECONDS}s, settle={SETTLE_SECONDS}s, agent={SINK_AGENT}) · pre-seen {init_count} existing jsonl as dispatched")
 
     while True:
         now = time.time()
