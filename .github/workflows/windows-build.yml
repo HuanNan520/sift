@@ -1,0 +1,66 @@
+name: Windows Build · .msi + portable .exe
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# windows-latest runner build · Tauri 2.0 .msi 出 release
+# 不需要 secrets · 不签名(SmartScreen 一次性警告 OK)
+# 如需 Microsoft Store · 上传 .msi → MSIX Packaging Tool 转 .msixbundle 手工上传 Partner Center
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust(MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Cache Rust target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            pwa-mvp/tauri/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('pwa-mvp/tauri/src-tauri/Cargo.lock') }}
+
+      - name: Sync PWA dist
+        working-directory: pwa-mvp/tauri
+        shell: bash
+        run: bash sync-dist.sh
+
+      - name: cargo tauri build (release · MSVC)
+        working-directory: pwa-mvp/tauri/src-tauri
+        run: cargo tauri build --target x86_64-pc-windows-msvc
+
+      - name: List bundle artifacts
+        run: |
+          Get-ChildItem -Recurse pwa-mvp/tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle | Select-Object FullName, Length
+
+      - name: Upload .msi artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sift-windows-msi
+          path: |
+            pwa-mvp/tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            pwa-mvp/tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: warn
+
+      - name: Upload to GitHub Release(tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pwa-mvp/tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            pwa-mvp/tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: false
