@@ -1,0 +1,34 @@
+# Sift · Caddy reverse proxy
+# Replace {$SIFT_DOMAIN} via .env (e.g. sift.example.com)
+# Caddy auto-issues + renews a Let's Encrypt cert when port 443 is reachable.
+
+{$SIFT_DOMAIN} {
+    encode gzip zstd
+
+    handle /api/* {
+        reverse_proxy sift-api:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto https
+        }
+    }
+
+    # Fallback (marketing pages, /welcome, /c/{slug})
+    handle {
+        reverse_proxy sift-api:8000
+    }
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+        # Tell upstream we terminated TLS
+        -Server
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
