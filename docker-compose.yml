@@ -1,0 +1,57 @@
+# Sift · self-host stack
+# Quickstart:
+#   1. cp .env.example .env  (then edit with your LLM key + domain)
+#   2. docker compose up -d
+#   3. Point your DNS A record at this host, Caddy will auto-issue HTTPS
+#   4. Open https://YOUR_DOMAIN/api/version to verify
+#
+# Two services: sift-api (FastAPI) + caddy (reverse proxy + auto ACME)
+
+services:
+  sift-api:
+    build: .
+    image: sift:latest
+    container_name: sift-api
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - sift-data:/data
+    # Internal port only — Caddy fronts it
+    expose:
+      - "8000"
+    networks:
+      - sift
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/version', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: sift-caddy
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - sift
+    depends_on:
+      - sift-api
+
+volumes:
+  sift-data:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+
+networks:
+  sift:
+    driver: bridge

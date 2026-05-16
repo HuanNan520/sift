@@ -166,6 +166,12 @@ frontmatter 硬约束:
 - decisions 必填: context + choice
 - 字符串字段含 # : ' " [ ] 等特殊字符时不用 quote,YAML 引用工具会处理
 - 不要凭空发明项目名 / 工具版本号 / 文件路径,只用对话里出现过的
+- result_chip 可选(写卡时判,不确定就 null): 用户在 sift APP 上看到这张卡时的"结果标签"
+  - "盲点"     = 卡片帮用户指出他没想到的点 / 提醒上次没注意 / 发现的漏洞
+  - "复盘"     = 卡片整理过去事件 / 旧案 / 历史方案 / 跨案关联
+  - "替做"     = sift 替用户做了某件事(自动整理周报 / 生成 PPT / 自动归档 / 跨设备同步推送)
+  - "坑提醒"   = 标记用户已经否过的方案 / 已知失败路径 / 别再重复犯错
+  - null      = 不属于以上 4 类,或不确定
 
 正文章节(必须按顺序):
 - debug: ## For future Claude / ## Problem / ## Root Cause / ## Solution / ## Pitfalls
@@ -226,6 +232,8 @@ def call_llm(transcript_text: str, today_str: str, timeout: int = 120) -> dict |
 
 
 def send_tg(text: str):
+    # MUTED 2026-05-13 · care-agent 接管推送 · sink-agent 不再每张卡都推
+    return
     token = os.environ.get("TG_BOT_TOKEN", "")
     chat_id = os.environ.get("TG_CHAT_ID", "")
     if not token or not chat_id:
