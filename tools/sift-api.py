@@ -36,6 +36,9 @@ from auth import (
     create_user, get_user_by_email, get_user_by_id, touch_login,
     verify_password, needs_rehash, hash_password,
     get_user_plan, get_quota_used,
+    set_verify_token, get_user_by_verify_token, mark_email_verified,
+    log_llm_usage, get_usage_summary,
+    issue_invite, consume_invite, list_invites,
 )
 import chat as chat_module
 import retriever
@@ -46,6 +49,99 @@ SIFT_USERS_ROOT = Path(os.environ.get("SIFT_USERS_ROOT", "/vol1/1000/sift/users"
 SIFT_USERS_ROOT.mkdir(parents=True, exist_ok=True)
 DB_PATH = Path(os.environ.get("SIFT_DB", "/vol1/1000/sift/sift.sqlite"))
 BASE_URL = os.environ.get("SIFT_BASE_URL", "https://sift.echovale.online")
+
+# v1 SaaS policy switches
+INVITE_REQUIRED = os.environ.get("INVITE_REQUIRED", "false").lower() == "true"
+EMAIL_VERIFY_REQUIRED = os.environ.get("EMAIL_VERIFY_REQUIRED", "false").lower() == "true"
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+
+
+# ────────── Rate limit (per IP, in-memory · alpha-grade) ──────────
+import collections
+_rate_buckets: dict = collections.defaultdict(list)
+
+
+def _rate_check(key: str, limit_per_min: int) -> bool:
+    """Return True if the request is allowed under the per-minute cap.
+
+    Bucket is keyed by `key` (e.g. "register:<ip>") and only the last 60s of
+    timestamps are kept. Trivial and not abuse-resistant — but enough to slow
+    register/login/chat spam during alpha until we add Redis or slowapi."""
+    now = time.time()
+    bucket = _rate_buckets[key]
+    cutoff = now - 60.0
+    bucket[:] = [t for t in bucket if t >= cutoff]
+    if len(bucket) >= max(1, limit_per_min):
+        return False
+    bucket.append(now)
+    return True
+
+
+def _rate_or_429(key: str, limit_per_min: int) -> None:
+    if not _rate_check(key, limit_per_min):
+        raise HTTPException(429, detail={"error": "rate_limited", "message": f"too many requests · limit {limit_per_min}/min"})
+
+
+def _ip_of(request: Optional[Request]) -> str:
+    if not request:
+        return "unknown"
+    fwd = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+# ────────── Email send wrapper (Phase 2) ──────────
+
+def _send_email(to_addr: str, subject: str, body: str) -> bool:
+    """Best-effort email send. Uses SMTP creds from env if set, otherwise prints
+    the body to stdout (dev mode) so the verify link is still visible.
+    Returns True if actually sent over SMTP."""
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+    smtp_port = int(os.environ.get("SMTP_PORT", "465"))
+    smtp_from = os.environ.get("SMTP_FROM", smtp_user or "noreply@sift.echovale.online")
+
+    if not (smtp_host and smtp_user and smtp_pass):
+        print(f"[email · dev mode] to={to_addr} subject={subject}\n{body}\n[/email]")
+        return False
+    import smtplib
+    from email.mime.text import MIMEText
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = to_addr
+    try:
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as s:
+                s.login(smtp_user, smtp_pass)
+                s.sendmail(smtp_from, [to_addr], msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+                s.starttls()
+                s.login(smtp_user, smtp_pass)
+                s.sendmail(smtp_from, [to_addr], msg.as_string())
+        return True
+    except Exception as e:
+        print(f"[email · send failed] to={to_addr} err={e}")
+        return False
+
+
+# ────────── Admin guard (Phase 2) ──────────
+
+async def admin_user(user: dict = Depends(current_user)) -> dict:
+    """Reject unless the current user's email is in ADMIN_EMAILS env."""
+    if not ADMIN_EMAILS:
+        raise HTTPException(403, detail={"error": "admin_disabled", "message": "ADMIN_EMAILS env not set"})
+    conn = db()
+    u = get_user_by_id(conn, user["uid"])
+    conn.close()
+    if not u or (u.get("email") or "").lower().strip() not in ADMIN_EMAILS:
+        raise HTTPException(403, detail={"error": "not_admin"})
+    return user
 
 
 # ────────── 多租户隔离 helpers (v1 SaaS) ──────────
@@ -492,7 +588,11 @@ async def auth_register(
     invite: str = Form(default=""),
     request: Request = None,
 ):
-    """注册 · 邮箱 + 密码 · 不强制邮件激活 · 返 access+refresh"""
+    """注册 · 邮箱 + 密码 · invite optional (INVITE_REQUIRED env controls strictness)
+    · 注册后发送验证邮件 (SMTP_HOST 未配则 dev-mode print)
+    · EMAIL_VERIFY_REQUIRED=false 允许未验证直接登录(alpha 默认)
+    """
+    _rate_or_429(f"register:{_ip_of(request)}", 3)
     email = email.lower().strip()
     if not email or "@" not in email or len(email) > 200:
         return JSONResponse({"ok": False, "error": "邮箱格式不对"}, 400)
@@ -500,12 +600,39 @@ async def auth_register(
         return JSONResponse({"ok": False, "error": "密码至少 6 字符"}, 400)
     if len(password) > 256:
         return JSONResponse({"ok": False, "error": "密码过长"}, 400)
+    invite = (invite or "").strip().upper()
     conn = db()
+    if INVITE_REQUIRED:
+        # Must be a previously-issued invite (admin endpoint) or another
+        # user's invite_code (alpha link-sharing).
+        if not invite:
+            conn.close()
+            return JSONResponse({"ok": False, "error": "invite_required",
+                                 "detail": {"error": "invite_required", "message": "需要邀请码"}}, 400)
+        # Pre-check (consume after user is created so it links to uid)
+        has_invite_row = bool(conn.execute("SELECT 1 FROM invites WHERE code=? AND used_by IS NULL", (invite,)).fetchone())
+        has_legacy = bool(conn.execute("SELECT 1 FROM users WHERE invite_code=?", (invite,)).fetchone())
+        if not (has_invite_row or has_legacy):
+            conn.close()
+            return JSONResponse({"ok": False, "error": "invite_invalid",
+                                 "detail": {"error": "invite_invalid", "message": "邀请码无效"}}, 400)
     try:
-        user = create_user(conn, email, password, invited_by=invite.strip() or None)
+        user = create_user(conn, email, password, invited_by=invite or None)
     except ValueError as e:
         conn.close()
         return JSONResponse({"ok": False, "error": str(e)}, 400)
+    # Consume invite now that we have a uid
+    if invite:
+        consume_invite(conn, invite, user["id"])
+    # Issue verify token + send email (best-effort)
+    verify_token = secrets.token_urlsafe(24)
+    set_verify_token(conn, user["id"], verify_token)
+    verify_url = f"{BASE_URL}/api/auth/verify?token={verify_token}"
+    _send_email(
+        email,
+        "Sift · 验证你的邮箱",
+        f"欢迎使用 Sift!\n\n请点击下面的链接完成邮箱验证(24h 内有效):\n{verify_url}\n\n如果你没注册过 Sift,忽略这封邮件即可。\n\n— Sift",
+    )
     access = create_access_token(user["id"], user.get("plan_id") or 1)
     ua = (request.headers.get("user-agent", "")[:200]) if request else ""
     refresh = create_refresh_token(conn, user["id"], ua)
@@ -516,7 +643,54 @@ async def auth_register(
         "access_token": access,
         "refresh_token": refresh,
         "token_type": "bearer",
+        "email_verify_sent": True,
     }
+
+
+@app.get("/api/auth/verify", response_class=HTMLResponse)
+async def auth_verify(token: str):
+    """邮箱验证回调 · token 在注册时邮件里发的 · 24h 过期"""
+    conn = db()
+    u = get_user_by_verify_token(conn, token) if token else None
+    if not u:
+        conn.close()
+        return HTMLResponse("<h1>链接无效或已过期</h1><p>请回 Sift APP 重发验证邮件。</p>", 400)
+    issued_at = u.get("verify_token_at") or 0
+    if int(time.time()) - int(issued_at) > 86400:
+        conn.close()
+        return HTMLResponse("<h1>链接已过期</h1><p>请回 Sift APP 重发验证邮件。</p>", 400)
+    mark_email_verified(conn, u["id"])
+    conn.close()
+    return HTMLResponse(
+        "<h1>✓ 邮箱已验证</h1>"
+        "<p>你可以回 Sift APP 继续使用了。</p>"
+        f"<p style='color:#888;font-size:13px'>验证账户: {u.get('email', '')}</p>",
+        200,
+    )
+
+
+@app.post("/api/auth/resend-verify", response_class=JSONResponse)
+async def auth_resend_verify(user: dict = Depends(current_user)):
+    """重发验证邮件 · 限频 · 已验证用户调返 ok 但不发"""
+    _rate_or_429(f"resend:{user['uid']}", 3)
+    conn = db()
+    u = get_user_by_id(conn, user["uid"])
+    if not u:
+        conn.close()
+        raise HTTPException(404, "user not found")
+    if u.get("email_verified_at"):
+        conn.close()
+        return {"ok": True, "already_verified": True}
+    new_token = secrets.token_urlsafe(24)
+    set_verify_token(conn, user["uid"], new_token)
+    verify_url = f"{BASE_URL}/api/auth/verify?token={new_token}"
+    _send_email(
+        u["email"],
+        "Sift · 重发邮箱验证",
+        f"请点击下面的链接完成邮箱验证(24h 内有效):\n{verify_url}\n\n— Sift",
+    )
+    conn.close()
+    return {"ok": True}
 
 
 @app.post("/api/auth/login", response_class=JSONResponse)
@@ -525,7 +699,10 @@ async def auth_login(
     password: str = Form(...),
     request: Request = None,
 ):
-    """登录 · 返 access+refresh · 密码错统一返"邮箱或密码错"避免枚举攻击"""
+    """登录 · 返 access+refresh · 密码错统一返"邮箱或密码错"避免枚举攻击
+    · EMAIL_VERIFY_REQUIRED=true 时未验证用户登录被拒(403 unverified)
+    """
+    _rate_or_429(f"login:{_ip_of(request)}", 5)
     email = email.lower().strip()
     conn = db()
     user = get_user_by_email(conn, email)
@@ -535,6 +712,10 @@ async def auth_login(
     if not verify_password(password, user["pwd_hash"]):
         conn.close()
         return JSONResponse({"ok": False, "error": "邮箱或密码错"}, 401)
+    if EMAIL_VERIFY_REQUIRED and not user.get("email_verified_at"):
+        conn.close()
+        return JSONResponse({"ok": False, "error": "email_unverified",
+                             "detail": {"error": "email_unverified", "message": "请先验证邮箱"}}, 403)
     # 自动 argon2 升级(参数变了重算)
     if needs_rehash(user["pwd_hash"]):
         try:
@@ -689,6 +870,9 @@ async def api_chat(
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)[:300]}, 500)
 
+    # rate limit chat per user (30/min)
+    _rate_or_429(f"chat:{user['uid']}", 30)
+
     # chat 流程 · BYOK 不扣配额(用户自己 key)· server-side 默认扣额
     used_byok = bool(payload.get("byok") and payload["byok"].get("api_key"))
     if not used_byok:
@@ -785,6 +969,8 @@ async def api_ingest(
     user: dict = Depends(current_user),
 ):
     """投喂入口 · 抓任意 URL → AI 写卡 → 进 vault · 需登录"""
+    # rate limit ingest per user (20/min)
+    _rate_or_429(f"ingest:{user['uid']}", 20)
     if ingest_url is None:
         return JSONResponse({"ok": False, "error": f"投喂模块加载失败: {_INGEST_IMPORT_ERROR}"}, 500)
     url = (url or "").strip()
@@ -1105,6 +1291,100 @@ def _table_exists(conn, table_name):
         (table_name,)
     ).fetchone()
     return row is not None
+
+
+# ────────── Phase 2 · /api/usage (per-user LLM accounting) ──────────
+
+
+@app.get("/api/usage", response_class=JSONResponse)
+async def api_usage(window: str = "month", user: dict = Depends(current_user)):
+    """本用户 LLM 使用统计 · window=day|week|month
+    返回 calls / input_tokens / output_tokens / estimated_cost_cny"""
+    now = int(time.time())
+    if window == "day":
+        since = now - 86400
+    elif window == "week":
+        since = now - 7 * 86400
+    else:
+        since = now - 30 * 86400
+    conn = db()
+    summary = get_usage_summary(conn, user["uid"], since)
+    conn.close()
+    summary["window"] = window
+    summary["since_ts"] = since
+    return summary
+
+
+# ────────── Phase 2 · /api/admin/* (owner-only via ADMIN_EMAILS env) ──────────
+
+
+@app.post("/api/admin/invite/generate", response_class=JSONResponse)
+async def admin_invite_generate(
+    count: int = Form(default=1),
+    note: str = Form(default=""),
+    admin: dict = Depends(admin_user),
+):
+    """Generate N fresh invite codes. Returns the list of codes."""
+    n = max(1, min(count, 50))
+    conn = db()
+    codes = []
+    try:
+        for _ in range(n):
+            codes.append(issue_invite(conn, admin["uid"], note=note))
+    finally:
+        conn.close()
+    return {"ok": True, "codes": codes, "count": len(codes)}
+
+
+@app.get("/api/admin/invite/list", response_class=JSONResponse)
+async def admin_invite_list(limit: int = 100, admin: dict = Depends(admin_user)):
+    conn = db()
+    items = list_invites(conn, limit=limit)
+    conn.close()
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/admin/user/tier", response_class=JSONResponse)
+async def admin_user_tier(
+    target_email: str = Form(...),
+    plan_id: int = Form(...),
+    admin: dict = Depends(admin_user),
+):
+    """Move a user to a different plan_id (e.g. Free=1 → Plus=2)."""
+    target_email = target_email.lower().strip()
+    if plan_id <= 0:
+        raise HTTPException(400, "plan_id must be > 0")
+    conn = db()
+    u = get_user_by_email(conn, target_email)
+    if not u:
+        conn.close()
+        raise HTTPException(404, "user not found")
+    plan = conn.execute("SELECT code FROM plans WHERE id=?", (plan_id,)).fetchone()
+    if not plan:
+        conn.close()
+        raise HTTPException(404, f"plan_id {plan_id} not found")
+    conn.execute("UPDATE users SET plan_id=? WHERE id=?", (plan_id, u["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "uid": u["id"], "email": target_email, "plan_id": plan_id, "plan_code": plan["code"]}
+
+
+@app.post("/api/admin/quota/reset", response_class=JSONResponse)
+async def admin_quota_reset(
+    target_email: str = Form(...),
+    admin: dict = Depends(admin_user),
+):
+    """Manually zero out a user's quota_used JSON (chat_today/ingest_today)."""
+    target_email = target_email.lower().strip()
+    conn = db()
+    u = get_user_by_email(conn, target_email)
+    if not u:
+        conn.close()
+        raise HTTPException(404, "user not found")
+    conn.execute("UPDATE users SET quota_used='{}' WHERE id=?", (u["id"],))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "uid": u["id"], "email": target_email}
 
 
 @app.get("/api/stats", response_class=JSONResponse)
