@@ -42,9 +42,49 @@ import retriever
 import quota as quota_module
 from sse_starlette.sse import EventSourceResponse
 
-SIFT_ROOT = Path(os.environ.get("SIFT_ROOT", "/vol1/1000/sift/vault"))
+SIFT_USERS_ROOT = Path(os.environ.get("SIFT_USERS_ROOT", "/vol1/1000/sift/users"))
+SIFT_USERS_ROOT.mkdir(parents=True, exist_ok=True)
 DB_PATH = Path(os.environ.get("SIFT_DB", "/vol1/1000/sift/sift.sqlite"))
 BASE_URL = os.environ.get("SIFT_BASE_URL", "https://sift.echovale.online")
+
+
+# ────────── 多租户隔离 helpers (v1 SaaS) ──────────
+# 每个用户的 vault / _reports / _audit 物理隔离在 SIFT_USERS_ROOT/{uid}/ 下。
+# 这取代了原来全局共享的 SIFT_ROOT,任何 endpoint 走 file system 都要先拿 uid。
+
+def get_user_vault(uid: int) -> Path:
+    """{users}/{uid}/vault — 卡片 markdown 主存储。自动创建。"""
+    p = SIFT_USERS_ROOT / str(int(uid)) / "vault"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_user_reports(uid: int) -> Path:
+    """{users}/{uid}/_reports — 周报 / 日报输出目录。"""
+    p = SIFT_USERS_ROOT / str(int(uid)) / "_reports"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_user_audit(uid: int) -> Path:
+    """{users}/{uid}/_audit — care-agent 审计日志、ingest 历史。"""
+    p = SIFT_USERS_ROOT / str(int(uid)) / "_audit"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def iter_user_dirs():
+    """Yield (uid:int, vault_path:Path) for every user under SIFT_USERS_ROOT
+    that has a vault directory. Used by startup index builder and global
+    aggregates that need to walk every tenant."""
+    if not SIFT_USERS_ROOT.exists():
+        return
+    for udir in SIFT_USERS_ROOT.iterdir():
+        if not udir.is_dir() or not udir.name.isdigit():
+            continue
+        vault = udir / "vault"
+        if vault.exists():
+            yield int(udir.name), vault
 
 app = FastAPI(title="sift", description="AI 知识库 · 沉淀你的每一段思考")
 
@@ -123,21 +163,51 @@ _init_conn = db()
 ensure_auth_schema(_init_conn)
 chat_module.ensure_chat_schema(_init_conn)
 _init_conn.close()
-# 启动时预建 retriever 索引(不阻塞 · 后台跑也行 · 这里同步 ~3 秒)
+# 启动时为每个已存在用户预建 retriever 索引。
+# Per-tenant since each user has an isolated vault.
 try:
-    retriever.build_index(SIFT_ROOT, force=True)
+    _built = 0
+    for _uid, _vault in iter_user_dirs():
+        try:
+            retriever.build_index(_vault, force=True)
+            _built += 1
+        except Exception as _e:
+            print(f"[retriever] uid={_uid} 索引失败: {_e}")
+    print(f"[retriever] 启动时为 {_built} 个用户建索引完成")
 except Exception as _e:
-    print(f"[retriever] 初始索引失败: {_e}")
+    print(f"[retriever] 启动扫用户目录失败: {_e}")
 
 
 # ────────── 卡片渲染辅助 ──────────
 
-def find_card_file(slug: str) -> Path | None:
-    """vault 里按 slug 找 markdown 文件(支持子目录)"""
-    if not re.match(r"^[a-zA-Z0-9一-龥぀-ヿ가-힯_-]{1,80}$", slug):
+_SLUG_RE = re.compile(r"^[a-zA-Z0-9一-龥぀-ヿ가-힯_-]{1,80}$")
+
+
+def find_card_file(uid: int, slug: str) -> Path | None:
+    """在用户 uid 自己的 vault 里按 slug 找 markdown 文件(支持子目录)。
+    返回 None 表示不存在或 slug 不合规。永不跨用户。"""
+    if not _SLUG_RE.match(slug):
         return None
-    for path in SIFT_ROOT.rglob(f"{slug}.md"):
+    vault = get_user_vault(uid)
+    for path in vault.rglob(f"{slug}.md"):
         return path
+    return None
+
+
+def find_public_card_file(slug: str) -> tuple[int, Path] | None:
+    """跨所有用户找标记 public: true 的 slug 对应卡片(用于 /c/{slug} 公开分享)。
+    扫到第一张匹配且 frontmatter public=true 的卡返回 (uid, path)。
+    没匹配返回 None。"""
+    if not _SLUG_RE.match(slug):
+        return None
+    for uid, vault in iter_user_dirs():
+        for p in vault.rglob(f"{slug}.md"):
+            try:
+                post = frontmatter.load(p)
+                if post.metadata.get("public") is True:
+                    return uid, p
+            except Exception:
+                continue
     return None
 
 
@@ -357,8 +427,16 @@ async def manifest():
 @app.get("/welcome", response_class=HTMLResponse)
 async def welcome(request: Request):
     """营销主页 · /welcome · 从 B 站简介 / 邀请链接进来看的"""
-    card_count = sum(1 for _ in SIFT_ROOT.rglob("*.md"))
-    vault_size_mb = sum(f.stat().st_size for f in SIFT_ROOT.rglob("*.md")) / 1024 / 1024
+    # Aggregate across all tenants for the public marketing counter.
+    card_count = 0
+    vault_size_mb = 0.0
+    for _uid, _vault in iter_user_dirs():
+        for f in _vault.rglob("*.md"):
+            try:
+                card_count += 1
+                vault_size_mb += f.stat().st_size / 1024 / 1024
+            except FileNotFoundError:
+                continue
     return HOME_HTML.format(
         card_count=card_count,
         vault_size_mb=int(vault_size_mb),
@@ -367,10 +445,12 @@ async def welcome(request: Request):
 
 @app.get("/c/{slug}", response_class=HTMLResponse)
 async def view_card(slug: str, request: Request):
-    """卡片公开渲染 · 带水印 · 接病毒传播入口"""
-    path = find_card_file(slug)
-    if not path:
-        raise HTTPException(404, "Card not found")
+    """卡片公开渲染 · 仅 frontmatter `public: true` 的卡可被任何人看。
+    其他卡只能通过登录后调 /api/cards/{slug} 拿到。"""
+    found = find_public_card_file(slug)
+    if not found:
+        raise HTTPException(404, "Card not found (or not public)")
+    _uid, path = found
     try:
         post = frontmatter.load(path)
     except Exception:
@@ -596,7 +676,7 @@ async def api_chat(
             _q_conn.close()
         url = chat_module.extract_url(message)
         try:
-            result = ingest_url(url)
+            result = ingest_url(url, uid=user["uid"])
             retriever.invalidate_index()
             return JSONResponse({
                 "ok": True,
@@ -711,8 +791,8 @@ async def api_ingest(
     if not url:
         return JSONResponse({"ok": False, "error": "URL 不能为空"}, 400)
     try:
-        # uid 暂传 1(HuanNan520)· A4 多用户改造后 ingest_url 接 uid 参数
-        result = ingest_url(url)
+        # v1 multi-tenant: ingest_url now requires uid
+        result = ingest_url(url, uid=user["uid"])
         return JSONResponse({
             "ok": True,
             "slug": result["slug"],
@@ -730,8 +810,9 @@ async def list_cards(
     user: dict = Depends(current_user),
 ):
     """列 vault 卡片(分页 · 可按 tag / 关键词过滤)· APP 端拉列表用 · 需登录"""
+    vault = get_user_vault(user["uid"])
     cards = []
-    for p in SIFT_ROOT.rglob("*.md"):
+    for p in vault.rglob("*.md"):
         try:
             st = p.stat()
             if st.st_size < 50:
@@ -792,8 +873,9 @@ async def list_cards(
 @app.get("/api/cards/index", response_class=JSONResponse)
 async def cards_index(limit: int = 500, user: dict = Depends(current_user)):
     """L1 索引 · 轻量 · 仅 slug+description+tags+mtime+result_chip · APP Today 屏 + LLM 召回用"""
+    vault = get_user_vault(user["uid"])
     items = []
-    for p in SIFT_ROOT.rglob("*.md"):
+    for p in vault.rglob("*.md"):
         try:
             st = p.stat()
             if st.st_size < 50:
@@ -826,8 +908,8 @@ async def cards_index(limit: int = 500, user: dict = Depends(current_user)):
 
 @app.get("/api/cards/{slug}", response_class=JSONResponse)
 async def get_card(slug: str, user: dict = Depends(current_user)):
-    """单卡 JSON · APP 端拉详情用 · 需登录(公开 /c/{slug} 不变)"""
-    path = find_card_file(slug)
+    """单卡 JSON · APP 端拉详情用 · 需登录 · 只在该用户自己的 vault 里找"""
+    path = find_card_file(user["uid"], slug)
     if not path:
         raise HTTPException(404, "Card not found")
     try:
@@ -853,14 +935,34 @@ async def get_card(slug: str, user: dict = Depends(current_user)):
 
 @app.get("/api/activity", response_class=JSONResponse)
 async def get_activity(limit: int = 20, user: dict = Depends(current_user)):
-    """care-agent audit log · APP 端"主动关心日志"页用 · 需登录"""
+    """care-agent audit log · APP 端"主动关心日志"页用 · 需登录 · 仅本用户记录"""
     conn = db()
-    rows = conn.execute(
-        "SELECT id, fired_at, reasoning, should_engage, message, actions, "
-        "next_trigger_at, next_context FROM care_audit "
-        "ORDER BY fired_at DESC LIMIT ?",
-        (max(1, min(limit, 100)),)
-    ).fetchall() if _table_exists(conn, "care_audit") else []
+    if _table_exists(conn, "care_audit"):
+        # care_audit 表如果没有 user_id 列就视作单租户旧数据(仅 uid=1 可见),
+        # 加列后(Phase 1 migration)按 user_id 过滤。
+        has_uid = bool(conn.execute(
+            "SELECT 1 FROM pragma_table_info('care_audit') WHERE name='user_id'"
+        ).fetchone())
+        if has_uid:
+            rows = conn.execute(
+                "SELECT id, fired_at, reasoning, should_engage, message, actions, "
+                "next_trigger_at, next_context FROM care_audit "
+                "WHERE user_id = ? "
+                "ORDER BY fired_at DESC LIMIT ?",
+                (user["uid"], max(1, min(limit, 100)))
+            ).fetchall()
+        elif user["uid"] == 1:
+            # legacy data without user_id — only owner (uid=1) sees it
+            rows = conn.execute(
+                "SELECT id, fired_at, reasoning, should_engage, message, actions, "
+                "next_trigger_at, next_context FROM care_audit "
+                "ORDER BY fired_at DESC LIMIT ?",
+                (max(1, min(limit, 100)),)
+            ).fetchall()
+        else:
+            rows = []
+    else:
+        rows = []
     conn.close()
 
     items = []
@@ -878,7 +980,8 @@ async def get_activity(limit: int = 20, user: dict = Depends(current_user)):
     return {"items": items, "count": len(items)}
 
 
-REPORTS_DIR = Path(os.environ.get("SIFT_REPORTS", "/vol1/1000/sift/_reports"))
+# REPORTS_DIR was the global single-tenant reports folder.
+# In v1 it is per-user: get_user_reports(uid). Kept for migration scripts only.
 _WEEK_RE = re.compile(r"^(\d{4}-W\d{2})")
 _REPORT_FILENAME_RE = re.compile(r"^[\w\-\.]+\.md$")
 
@@ -900,10 +1003,11 @@ def _report_title(path: Path) -> str:
 @app.get("/api/reports", response_class=JSONResponse)
 async def list_reports(limit: int = 20, user: dict = Depends(current_user)):
     """周报列表 · `_reports/*.md` 按 mtime 降序 · APP Reports 屏用 · 需登录"""
-    if not REPORTS_DIR.exists():
+    reports_dir = get_user_reports(user["uid"])
+    if not reports_dir.exists():
         return {"items": [], "count": 0}
     files = []
-    for p in REPORTS_DIR.rglob("*.md"):
+    for p in reports_dir.rglob("*.md"):
         try:
             st = p.stat()
             files.append((p, st))
@@ -928,13 +1032,14 @@ async def get_report(filename: str, user: dict = Depends(current_user)):
     """单份周报 · markdown + 渲染 html · 路径穿越双重防御 · 需登录"""
     if "/" in filename or ".." in filename or not _REPORT_FILENAME_RE.match(filename):
         raise HTTPException(400, "Invalid filename")
-    path = (REPORTS_DIR / filename).resolve()
+    reports_dir = get_user_reports(user["uid"])
+    path = (reports_dir / filename).resolve()
     try:
-        if not path.is_relative_to(REPORTS_DIR.resolve()):
+        if not path.is_relative_to(reports_dir.resolve()):
             raise HTTPException(400, "Path traversal denied")
     except AttributeError:
         # Python < 3.9 fallback
-        if not str(path).startswith(str(REPORTS_DIR.resolve())):
+        if not str(path).startswith(str(reports_dir.resolve())):
             raise HTTPException(400, "Path traversal denied")
     if not path.exists() or not path.is_file():
         raise HTTPException(404, "Report not found")
@@ -962,9 +1067,10 @@ async def search_vault(q: str, limit: int = 20, user: dict = Depends(current_use
     if not q or len(q) < 2:
         return {"results": [], "query": q, "count": 0}
 
+    vault = get_user_vault(user["uid"])
     q_lower = q.lower()
     hits = []
-    for p in SIFT_ROOT.rglob("*.md"):
+    for p in vault.rglob("*.md"):
         try:
             text = p.read_text(encoding="utf-8", errors="ignore")
             if q_lower in text.lower():
@@ -1003,16 +1109,27 @@ def _table_exists(conn, table_name):
 
 @app.get("/api/stats", response_class=JSONResponse)
 async def stats():
-    card_count = sum(1 for _ in SIFT_ROOT.rglob("*.md"))
-    vault_size_mb = round(sum(f.stat().st_size for f in SIFT_ROOT.rglob("*.md")) / 1024 / 1024, 2)
+    """Public anonymized aggregate. Used by /welcome marketing page only."""
+    card_count = 0
+    vault_size_mb = 0.0
+    for _uid, _vault in iter_user_dirs():
+        for f in _vault.rglob("*.md"):
+            try:
+                card_count += 1
+                vault_size_mb += f.stat().st_size / 1024 / 1024
+            except FileNotFoundError:
+                continue
+    vault_size_mb = round(vault_size_mb, 2)
     conn = db()
     waitlist_count = conn.execute("SELECT COUNT(*) FROM waitlist").fetchone()[0]
+    user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     conn.close()
     return {
         "cards": card_count,
         "vault_mb": vault_size_mb,
+        "users": user_count,
         "waitlist": waitlist_count,
-        "version": "0.2.0-alpha",
+        "version": "0.7.0-saas-v1",
     }
 
 
@@ -1413,8 +1530,15 @@ async def landing_root():
     if LANDING_PATH.exists():
         return HTMLResponse(LANDING_PATH.read_text(encoding="utf-8"))
     # fallback to old HOME_HTML(实际不会走到 · landing.html 应存在)
-    card_count = sum(1 for _ in SIFT_ROOT.rglob("*.md"))
-    vault_size_mb = sum(f.stat().st_size for f in SIFT_ROOT.rglob("*.md")) / 1024 / 1024
+    card_count = 0
+    vault_size_mb = 0.0
+    for _uid, _vault in iter_user_dirs():
+        for f in _vault.rglob("*.md"):
+            try:
+                card_count += 1
+                vault_size_mb += f.stat().st_size / 1024 / 1024
+            except FileNotFoundError:
+                continue
     return HOME_HTML.format(card_count=card_count, vault_size_mb=int(vault_size_mb))
 
 
